@@ -72,6 +72,8 @@ def main():
             print(f"Erro: coluna '{col}' não encontrada no CSV.")
             sys.exit(1)
 
+    tem_original = 'Title_original' in df.columns and 'id_original' in df.columns
+
     # Criar coluna de título reformatado (temporária)
     print("Reformatando títulos...")
     df['_titulo_fmt'] = df['Title'].apply(reformatar_titulo)
@@ -88,7 +90,30 @@ def main():
     ids = df['id'].tolist()
     titulos = df['_titulo_fmt'].tolist()
 
-    print(f"\nIniciando comparações ({total_comparacoes:,} no total)...\n")
+    # ----------------------------------------------------------------
+    # Construir lista deduplicada de Title_original
+    # ----------------------------------------------------------------
+    lista_originais = []  # cada item: {'titulo_fmt': str, 'id_original': str}
+    if tem_original:
+        print("Construindo lista deduplicada de Title_original...")
+        vistos = {}  # titulo_fmt -> id_original (primeiro encontrado)
+        for _, row in df.iterrows():
+            t_fmt = reformatar_titulo(row['Title_original'])
+            if t_fmt == "":
+                continue
+            if t_fmt not in vistos:
+                vistos[t_fmt] = str(row['id_original'])
+        lista_originais = [{'titulo_fmt': k, 'id_original': v} for k, v in vistos.items()]
+        print(f"  → {len(df):,} linhas → {len(lista_originais):,} títulos originais únicos\n")
+    else:
+        print("  (colunas Title_original / id_original não encontradas — etapa ignorada)\n")
+
+    total_comparacoes_orig = n * len(lista_originais)
+
+    print(f"Iniciando comparações Title×Title ({total_comparacoes:,} pares)...")
+    if lista_originais:
+        print(f"Iniciando comparações Title×Title_original ({total_comparacoes_orig:,} pares)...")
+    print()
 
     inicio = time.time()
 
@@ -96,6 +121,7 @@ def main():
     repeticoes = {i: [] for i in range(n)}
 
     for i in range(n):
+        # --- Fase 1: comparação Title × Title (apenas j > i) ---
         for j in range(i + 1, n):
             comparacoes_feitas += 1
             sim = similaridade_palavras(titulos[i], titulos[j])
@@ -104,13 +130,24 @@ def main():
                 repeticoes[j].append(str(ids[i]))
                 duplicatas_encontradas += 1
 
+        # --- Fase 2: comparação Title[i] × cada Title_original único ---
+        for orig in lista_originais:
+            sim = similaridade_palavras(titulos[i], orig['titulo_fmt'])
+            if sim > 0.95:
+                id_orig_str = orig['id_original']
+                # Evitar adicionar o próprio id_original da linha caso sejam o mesmo artigo
+                if id_orig_str not in repeticoes[i]:
+                    repeticoes[i].append(id_orig_str)
+                    duplicatas_encontradas += 1
+
         # Imprimir progresso ao final de cada linha verificada
-        pct = comparacoes_feitas / total_comparacoes * 100
+        total_geral = total_comparacoes + total_comparacoes_orig
+        comp_geral = comparacoes_feitas + (i + 1) * len(lista_originais)
+        pct = comp_geral / total_geral * 100 if total_geral > 0 else 100.0
         elapsed = time.time() - inicio
-        # Estimativa de tempo restante
-        if comparacoes_feitas > 0:
-            taxa = comparacoes_feitas / elapsed
-            restante = (total_comparacoes - comparacoes_feitas) / taxa
+        if comp_geral > 0 and elapsed > 0:
+            taxa = comp_geral / elapsed
+            restante = (total_geral - comp_geral) / taxa
             eta_str = f" | ETA: {restante:.0f}s"
         else:
             eta_str = ""
@@ -147,12 +184,15 @@ def main():
     print("\n" + "=" * 60)
     print("   ESTATÍSTICAS FINAIS")
     print("=" * 60)
-    print(f"  Total de artigos analisados  : {n:,}")
-    print(f"  Total de comparações feitas  : {total_comparacoes:,}")
-    print(f"  Pares duplicados encontrados : {duplicatas_encontradas:,}")
-    print(f"  Artigos marcados como repet. : {linhas_com_repeticao:,}")
-    print(f"  Tempo de execução            : {tempo_total:.2f} segundos")
-    print(f"  Arquivo de saída             : {nome_saida}")
+    print(f"  Total de artigos analisados   : {n:,}")
+    print(f"  Comparações Title x Title     : {total_comparacoes:,}")
+    if lista_originais:
+        print(f"  Títulos originais únicos      : {len(lista_originais):,}")
+        print(f"  Comparações Title x T.Orig.   : {total_comparacoes_orig:,}")
+    print(f"  Duplicatas encontradas (total) : {duplicatas_encontradas:,}")
+    print(f"  Artigos marcados como repet.  : {linhas_com_repeticao:,}")
+    print(f"  Tempo de execução             : {tempo_total:.2f} segundos")
+    print(f"  Arquivo de saída              : {nome_saida}")
     print("=" * 60)
 
 
