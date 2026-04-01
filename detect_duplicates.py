@@ -47,10 +47,8 @@ def extrair_sobrenomes(autores_str):
             continue
 
         if ',' in parte:
-            # "Sobrenome, Nome/Inicial" -> tudo antes da primeira vírgula
             sobrenome = parte.split(',')[0].strip()
         else:
-            # "Nome Sobrenome" -> última palavra não-abreviada
             tokens = parte.split()
             tokens = [t for t in tokens if len(re.sub(r'[^A-Za-z]', '', t)) > 1]
             sobrenome = tokens[-1] if tokens else parte
@@ -73,10 +71,6 @@ def autores_compativeis(set_a, set_b):
 
 
 def similaridade_palavras(titulo1, titulo2):
-    """
-    Compara dois títulos reformatados como listas de palavras.
-    Retorna fração de palavras em comum (respeitando ordem) sobre o máximo dos dois tamanhos.
-    """
     palavras1 = titulo1.split()
     palavras2 = titulo2.split()
 
@@ -126,11 +120,9 @@ def main():
     if not tem_autores:
         print("  (coluna 'Authors' não encontrada — validação por autores será ignorada)\n")
 
-    # Reformatar títulos
     print("Reformatando títulos...")
     df['_titulo_fmt'] = df['Title'].apply(reformatar_titulo)
 
-    # Pré-computar sobrenomes de cada linha
     if tem_autores:
         print("Extraindo sobrenomes dos autores...")
         sobrenomes_por_linha = [extrair_sobrenomes(a) for a in df['Authors']]
@@ -144,7 +136,7 @@ def main():
     comparacoes_tt  = 0
     duplicatas_titulo = 0
 
-    ids    = df['id'].tolist()
+    ids     = df['id'].tolist()
     titulos = df['_titulo_fmt'].tolist()
 
     # ----------------------------------------------------------------
@@ -172,9 +164,6 @@ def main():
 
     inicio = time.time()
 
-    # repeticoes_raw[i] = lista de (id_str, j_idx_ou_None)
-    # j_idx é o índice da linha duplicada na tabela (para checar autores depois)
-    # j_idx = None quando veio de Title_original (sem linha correspondente)
     repeticoes_raw = {i: [] for i in range(n)}
 
     for i in range(n):
@@ -215,6 +204,9 @@ def main():
     # Validação por autores
     # ----------------------------------------------------------------
     descartados = 0
+    # Cada entrada: {'id_A': str, 'title_A': str, 'authors_A': str,
+    #                'id_B': str, 'title_B': str, 'authors_B': str}
+    registros_descartados = []
 
     if tem_autores:
         print("Validando duplicatas por autores...")
@@ -226,21 +218,30 @@ def main():
                         sobrenomes_por_linha[i],
                         sobrenomes_por_linha[j_idx]
                     )
+                    if not compativel:
+                        descartados += 1
+                        # Registrar o par descartado (evitar duplicar: só registra quando i < j_idx)
+                        if i < j_idx:
+                            registros_descartados.append({
+                                'id_A':      ids[i],
+                                'Title_A':   df.at[i, 'Title'],
+                                'Authors_A': df.at[i, 'Authors'],
+                                'id_B':      ids[j_idx],
+                                'Title_B':   df.at[j_idx, 'Title'],
+                                'Authors_B': df.at[j_idx, 'Authors'],
+                            })
+                    else:
+                        validas.append((id_str, j_idx))
                 else:
                     # Veio de Title_original, sem Authors correspondente → mantém
-                    compativel = True
-
-                if compativel:
                     validas.append((id_str, j_idx))
-                else:
-                    descartados += 1
 
             repeticoes_raw[i] = validas
 
         print(f"  → {descartados:,} marcações removidas por autores incompatíveis\n")
 
     # ----------------------------------------------------------------
-    # Preencher coluna 'Repetido' e salvar
+    # Preencher coluna 'Repetido' e salvar CSV principal
     # ----------------------------------------------------------------
     for i in range(n):
         ids_finais = [e[0] for e in repeticoes_raw[i]]
@@ -249,12 +250,35 @@ def main():
 
     df.drop(columns=['_titulo_fmt'], inplace=True)
 
-    nome_saida = input("Digite o nome do arquivo CSV de saída: ").strip()
+    nome_saida = input("Digite o nome do arquivo CSV de saída principal: ").strip()
     if not nome_saida.lower().endswith('.csv'):
         nome_saida += '.csv'
 
     df.to_csv(nome_saida, index=False, encoding='utf-8')
 
+    # ----------------------------------------------------------------
+    # Salvar CSV de descartados por autores
+    # ----------------------------------------------------------------
+    if tem_autores and registros_descartados:
+        nome_descartados = input("Digite o nome do CSV de pares descartados por autores: ").strip()
+        if not nome_descartados.lower().endswith('.csv'):
+            nome_descartados += '.csv'
+
+        df_descartados = pd.DataFrame(registros_descartados, columns=[
+            'id_A', 'Title_A', 'Authors_A',
+            'id_B', 'Title_B', 'Authors_B',
+        ])
+        df_descartados.to_csv(nome_descartados, index=False, encoding='utf-8')
+        print(f"  → CSV de descartados salvo: '{nome_descartados}' ({len(df_descartados)} pares)\n")
+    elif tem_autores:
+        print("  (nenhum par foi descartado por autores — CSV de descartados não gerado)\n")
+        nome_descartados = None
+    else:
+        nome_descartados = None
+
+    # ----------------------------------------------------------------
+    # Estatísticas finais
+    # ----------------------------------------------------------------
     tempo_total = time.time() - inicio
     linhas_com_repeticao = df[df['Repetido'] != ''].shape[0]
 
@@ -272,7 +296,9 @@ def main():
         print(f"  Duplicatas confirmadas             : {duplicatas_titulo - descartados:,}")
     print(f"  Artigos marcados como repet.       : {linhas_com_repeticao:,}")
     print(f"  Tempo de execução                  : {tempo_total:.2f} segundos")
-    print(f"  Arquivo de saída                   : {nome_saida}")
+    print(f"  Arquivo principal                  : {nome_saida}")
+    if nome_descartados:
+        print(f"  Arquivo de descartados             : {nome_descartados}")
     print("=" * 60)
 
 
