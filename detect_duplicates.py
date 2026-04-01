@@ -25,39 +25,27 @@ def normalizar_sobrenome(s):
 
 
 def extrair_sobrenomes(autores_str):
-    """
-    Recebe a string bruta da coluna Authors e retorna um set de sobrenomes normalizados.
-
-    Formatos suportados:
-      - "Sobrenome, Inicial."       ex: "Gratz, G."
-      - "Sobrenome, Nome Completo"  ex: "Smith, John"
-      - "Nome Sobrenome"            ex: "John Smith"
-    Separadores: ponto-e-vírgula ou ' and '
-    """
     if pd.isna(autores_str) or str(autores_str).strip() == '':
         return set()
 
     raw = str(autores_str)
+    # Separar autores
     partes = re.split(r';| and ', raw, flags=re.IGNORECASE)
 
-    sobrenomes = set()
+    tokens = set()
     for parte in partes:
         parte = parte.strip()
         if not parte:
             continue
+        # Remover pontuação e separar em palavras
+        palavras = re.split(r'[\s,.\-]+', parte)
+        for p in palavras:
+            p_norm = normalizar_sobrenome(p)
+            # Ignorar tokens muito curtos (iniciais soltas como "G", "M", "MN")
+            if len(p_norm) > 2:
+                tokens.add(p_norm)
 
-        if ',' in parte:
-            sobrenome = parte.split(',')[0].strip()
-        else:
-            tokens = parte.split()
-            tokens = [t for t in tokens if len(re.sub(r'[^A-Za-z]', '', t)) > 1]
-            sobrenome = tokens[-1] if tokens else parte
-
-        sobrenome_norm = normalizar_sobrenome(sobrenome)
-        if sobrenome_norm:
-            sobrenomes.add(sobrenome_norm)
-
-    return sobrenomes
+    return tokens
 
 
 def autores_compativeis(set_a, set_b):
